@@ -4,14 +4,15 @@ metadata:
   name: whisper-ingress
   namespace: whisper
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
 spec:
-  ingressClassName: nginx
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - whisper.wezoomtek.com.tw
+      secretName: whisper-tls
   rules:
-    - host: whisper.example.com  # 改成你的 domain
+    - host: whisper.wezoomtek.com.tw
       http:
         paths:
           - path: /api

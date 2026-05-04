@@ -15,6 +15,7 @@ from app.config import (
     BACKEND_VAD_SILENCE_MS,
     BACKEND_VAD_SPEECH_PAD_MS,
     BACKEND_VAD_THRESHOLD,
+    ASR_BACKEND,
     COMPUTE_TYPE,
     DEFAULT_LANGUAGE,
     DEVICE,
@@ -29,20 +30,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 # ──────────────────────────────────────────
-# faster-whisper 單例（僅未設定 WHISPER_CPP_URL 時使用）
+# ASR 單例（僅未設定 WHISPER_CPP_URL 時使用）
 # ──────────────────────────────────────────
 _stream_model: Any = None
 _model_lock = threading.Lock()
 
 
 def _get_stream_model() -> Any:
-    """Double-checked locking 取得 faster-whisper 單例。"""
+    """Double-checked locking 取得 ASR backend 單例。"""
     global _stream_model
     if _stream_model is not None:
         return _stream_model
     with _model_lock:
         if _stream_model is not None:
             return _stream_model
+        if ASR_BACKEND == "transformers":
+            _stream_model = _load_transformers_model()
+            return _stream_model
+
         from faster_whisper import WhisperModel  # 僅在需要時載入
 
         device = DEVICE
@@ -59,6 +64,28 @@ def _get_stream_model() -> Any:
         logger.info("Loading model=%s device=%s compute_type=%s", STREAM_MODEL, device, compute_type)
         _stream_model = WhisperModel(STREAM_MODEL, device=device, compute_type=compute_type)
     return _stream_model
+
+
+def _load_transformers_model() -> dict[str, Any]:
+    """載入 PyTorch/Transformers Whisper 模型。"""
+    import torch
+    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+
+    device = DEVICE
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device == "cuda" else torch.float32
+
+    logger.info("Loading transformers model=%s device=%s dtype=%s", STREAM_MODEL, device, dtype)
+    processor = AutoProcessor.from_pretrained(STREAM_MODEL)
+    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        STREAM_MODEL,
+        torch_dtype=dtype,
+        low_cpu_mem_usage=True,
+        use_safetensors=True,
+    ).to(device)
+    model.eval()
+    return {"backend": "transformers", "model": model, "processor": processor, "device": device, "dtype": dtype}
 
 
 # ──────────────────────────────────────────
@@ -98,7 +125,7 @@ async def health() -> JSONResponse:
     """健康檢查：確認 Whisper 後端已就緒。"""
     if not WHISPER_CPP_URL and _stream_model is None:
         return JSONResponse({"status": "loading"}, status_code=503)
-    backend = "whisper.cpp" if WHISPER_CPP_URL else "faster-whisper"
+    backend = "whisper.cpp" if WHISPER_CPP_URL else ASR_BACKEND
     return JSONResponse({"status": "ok", "backend": backend, "model": STREAM_MODEL})
 
 
@@ -173,7 +200,7 @@ async def websocket_stream(ws: WebSocket) -> None:
 
 
 # ──────────────────────────────────────────
-# 轉錄策略：優先 whisper.cpp，否則 faster-whisper
+# 轉錄策略：優先 whisper.cpp，否則依 ASR_BACKEND 選擇本機 backend
 # ──────────────────────────────────────────
 
 
@@ -183,6 +210,8 @@ async def _transcribe(wav_bytes: bytes, language: str = DEFAULT_LANGUAGE) -> str
         return await whisper_cpp_transcribe(wav_bytes, language)
 
     model = await asyncio.to_thread(_get_stream_model)
+    if ASR_BACKEND == "transformers":
+        return await asyncio.to_thread(_transcribe_transformers, model, wav_bytes, language)
     return await asyncio.to_thread(_transcribe_faster_whisper, model, wav_bytes, language)
 
 
@@ -204,3 +233,42 @@ def _transcribe_faster_whisper(model: Any, wav_bytes: bytes, language: str) -> s
         }
     segments, _ = model.transcribe(wav_io, **transcribe_kwargs)
     return "".join(seg.text for seg in segments)
+
+
+def _transcribe_transformers(runtime: dict[str, Any], wav_bytes: bytes, language: str) -> str:
+    """在 thread pool 中執行 PyTorch/Transformers Whisper 同步轉錄。"""
+    import io
+
+    import librosa
+    import numpy as np
+    import soundfile as sf
+    import torch
+
+    processor = runtime["processor"]
+    model = runtime["model"]
+    device = runtime["device"]
+    dtype = runtime["dtype"]
+
+    audio, sample_rate = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    if audio.ndim > 1:
+        audio = np.mean(audio, axis=1)
+    if sample_rate != 16000:
+        audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
+        sample_rate = 16000
+
+    inputs = processor(audio, sampling_rate=sample_rate, return_tensors="pt")
+    input_features = inputs.input_features.to(device=device, dtype=dtype)
+
+    generate_kwargs: dict[str, Any] = {}
+    if language and language != "auto":
+        try:
+            generate_kwargs["forced_decoder_ids"] = processor.get_decoder_prompt_ids(
+                language=language,
+                task="transcribe",
+            )
+        except Exception:
+            logger.warning("Unsupported transformers language hint: %s", language)
+
+    with torch.inference_mode():
+        predicted_ids = model.generate(input_features, **generate_kwargs)
+    return processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()

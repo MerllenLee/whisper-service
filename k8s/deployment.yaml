@@ -4,7 +4,12 @@ metadata:
   name: api
   namespace: whisper
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: api
@@ -15,22 +20,35 @@ spec:
     spec:
       containers:
         - name: api
-          image: whisper-api:latest
+          image: 10.1.1.29:5000/whisper-api:transformers-gpu-app-fp16-input-fix
           imagePullPolicy: Never
           ports:
             - containerPort: 8000
           envFrom:
             - configMapRef:
                 name: whisper-config
-          # 單 GPU 部署策略：GPU 留給 llm（Breeze-2-8B），api 走 CPU
-          # Breeze-ASR-25 模型小（~1.5GB），CPU + int8 量化版本可用
+          env:
+            - name: ASR_BACKEND
+              value: transformers
+            - name: STREAM_MODEL
+              value: openai/whisper-small
+            - name: DEVICE
+              value: auto
+            - name: COMPUTE_TYPE
+              value: float16
+            - name: EMBEDDING_DEVICE
+              value: cpu
+          # GB10 單節點 GPU 共享：API ASR 使用 1 個 time-slicing GPU slot。
+          # Embedding 固定使用 CPU，避免和 ASR、LLM 競爭 GPU memory。
           resources:
             requests:
-              cpu: "4"
+              cpu: "2"
               memory: 8Gi
+              nvidia.com/gpu: "1"
             limits:
-              cpu: "8"
+              cpu: "4"
               memory: 16Gi
+              nvidia.com/gpu: "1"
           readinessProbe:
             httpGet:
               path: /api/health

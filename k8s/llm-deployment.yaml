@@ -5,6 +5,8 @@ metadata:
   namespace: whisper
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: llm
@@ -15,10 +17,62 @@ spec:
     spec:
       containers:
         - name: llm
-          image: whisper-llm:latest
+          image: whisper-llm:v202604291509
           imagePullPolicy: Never
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - |
+              set -euo pipefail
+
+              MODEL_ID="${LLM_MODEL:-bg-digitalservices/Gemma-4-E2B-NVFP4}"
+              CACHE_ROOT="/root/.cache/huggingface/hub/models--${MODEL_ID//\//--}/snapshots"
+              MODEL_PATH="$(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+
+              python3 - "${MODEL_PATH}" <<'PY'
+              import json
+              import os
+              import sys
+
+              model_path = sys.argv[1]
+              index_file = os.path.join(model_path, "model.safetensors.index.json")
+              weight_file = os.path.join(model_path, "model.safetensors")
+
+              if not os.path.exists(weight_file):
+                  raise SystemExit(f"Missing model weights: {weight_file}")
+
+              if os.path.exists(index_file):
+                  with open(index_file, "r", encoding="utf-8") as f:
+                      index = json.load(f)
+                  if index.get("weight_map") == {}:
+                      os.remove(index_file)
+                      print(f"Removed empty safetensors index: {index_file}", flush=True)
+              PY
+
+              exec python3 -m vllm.entrypoints.openai.api_server \
+                --model "${MODEL_PATH}" \
+                --served-model-name "${MODEL_ID}" \
+                --quantization modelopt \
+                --trust-remote-code \
+                --port 8001 \
+                --max-model-len 131072 \
+                --dtype auto \
+                --gpu-memory-utilization 0.4 \
+                --kv-cache-dtype fp8 \
+                --chat-template "{% for message in messages %}{% if message['role'] == 'system' %}{{ message['content'] + '\n\n' }}{% elif message['role'] == 'user' %}{{ message['content'] + '\n\n' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + '\n\n' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '回答：' }}{% endif %}" \
+                --chat-template-content-format string \
+                --load-format safetensors
           ports:
             - containerPort: 8001
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+            - name: VLLM_NVFP4_GEMM_BACKEND
+              value: marlin
           envFrom:
             - configMapRef:
                 name: whisper-config
@@ -35,16 +89,16 @@ spec:
             httpGet:
               path: /health
               port: 8001
-            initialDelaySeconds: 120
+            initialDelaySeconds: 180
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health
               port: 8001
-            initialDelaySeconds: 120
+            initialDelaySeconds: 240
             periodSeconds: 30
       nodeSelector:
-        gpu: "true"
+        nvidia.com/gpu.present: "true"
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists

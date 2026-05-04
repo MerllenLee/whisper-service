@@ -1,0 +1,47 @@
+FROM nvcr.io/nvidia/pytorch:26.03-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip
+
+RUN useradd -m -s /bin/bash appuser
+
+WORKDIR /app
+
+COPY api/requirements.txt .
+RUN python3 -m pip install --no-cache-dir -r requirements.txt \
+    && python3 -m pip install --no-cache-dir \
+      accelerate \
+      librosa \
+      sentencepiece \
+      soundfile \
+      "transformers>=4.46,<5"
+
+RUN mkdir -p /home/appuser/.cache/huggingface \
+    && chown -R appuser:appuser /home/appuser/.cache
+
+USER appuser
+
+ENV HF_HOME=/home/appuser/.cache/huggingface \
+    ASR_BACKEND=transformers \
+    DEVICE=auto \
+    COMPUTE_TYPE=float16 \
+    STREAM_MODEL=openai/whisper-small
+
+ARG STREAM_MODEL=openai/whisper-small
+ARG EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+ARG HF_TOKEN
+
+RUN python3 -c "from huggingface_hub import snapshot_download; \
+    snapshot_download('${STREAM_MODEL}', token='${HF_TOKEN}'); \
+    snapshot_download('${EMBEDDING_MODEL}', token='${HF_TOKEN}')"
+
+COPY --chown=appuser:appuser api/app/ app/
+COPY --chown=appuser:appuser api/data/ data/
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

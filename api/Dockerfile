@@ -12,8 +12,9 @@ COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api/app/ app/
+COPY api/data/ data/
 
-RUN mkdir -p /home/appuser/.cache/huggingface && chown -R appuser:appuser /home/appuser/.cache
+RUN mkdir -p /home/appuser/.cache/huggingface && chown -R appuser:appuser /home/appuser/.cache && chown -R appuser:appuser /app
 
 USER appuser
 
@@ -23,8 +24,10 @@ ENV HF_HOME=/home/appuser/.cache/huggingface
 # 使用 huggingface_hub.snapshot_download 僅下載檔案不載入到記憶體，避免 build OOM
 ARG STREAM_MODEL=phate334/Breeze-ASR-25-ct2
 ARG EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+ARG HF_TOKEN
+
 RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download('${STREAM_MODEL}'); \
-    snapshot_download('${EMBEDDING_MODEL}')"
+    snapshot_download('${STREAM_MODEL}', token='${HF_TOKEN}'); \
+    snapshot_download('${EMBEDDING_MODEL}', token='${HF_TOKEN}')"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

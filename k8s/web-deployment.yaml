@@ -13,10 +13,12 @@ spec:
       labels:
         app: web
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       containers:
         - name: web
-          image: whisper-web:latest
-          imagePullPolicy: Never
+          image: 10.1.1.29:5000/whisper-web:v202604291738
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
           resources:

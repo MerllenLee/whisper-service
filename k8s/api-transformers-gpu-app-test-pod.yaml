@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: api-transformers-gpu-app-test
+  namespace: whisper
+  labels:
+    app: api-transformers-gpu-app-test
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+    nvidia.com/gpu.sharing-strategy: time-slicing
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: api
+      image: 10.1.1.29:5000/whisper-api:transformers-gpu-app-cpu-embedding
+      imagePullPolicy: Never
+      ports:
+        - containerPort: 8000
+      env:
+        - name: ASR_BACKEND
+          value: transformers
+        - name: STREAM_MODEL
+          value: openai/whisper-small
+        - name: DEVICE
+          value: auto
+        - name: COMPUTE_TYPE
+          value: float16
+        - name: LLM_BASE_URL
+          value: http://llm:8001/v1
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"

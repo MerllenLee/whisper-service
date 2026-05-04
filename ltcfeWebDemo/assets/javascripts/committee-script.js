@@ -331,7 +331,8 @@ window.addEventListener('DOMContentLoaded', function () {
     // 自動連線 WebSocket
     const wsInput = document.getElementById('wsUrlInput');
     if (wsInput && !wsInput.value.trim()) {
-        wsInput.value = 'ws://localhost:8000/api/stream';
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsInput.value = `${wsProtocol}//${window.location.host}/api/stream`;
     }
     wsConnect();
 });

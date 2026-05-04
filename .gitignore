@@ -30,6 +30,8 @@ output/
 
 # Docker
 .env
+*.tar
+build.log
 
 # OS
 .DS_Store

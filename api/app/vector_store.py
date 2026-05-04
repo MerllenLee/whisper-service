@@ -20,6 +20,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from app.config import EMBEDDING_DEVICE
+
 logger = logging.getLogger(__name__)
 
 # ── 常數 ────────────────────────────────────────────────────────────────────
@@ -79,9 +81,9 @@ class VectorStore:
         )
 
         # 初始化 embedding 模型
-        logger.info("載入 embedding 模型: %s", _EMBEDDING_MODEL)
+        logger.info("載入 embedding 模型: %s device=%s", _EMBEDDING_MODEL, EMBEDDING_DEVICE)
         from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(_EMBEDDING_MODEL)
+        self._model = SentenceTransformer(_EMBEDDING_MODEL, device=EMBEDDING_DEVICE)
 
         # 初始化 ChromaDB
         import chromadb

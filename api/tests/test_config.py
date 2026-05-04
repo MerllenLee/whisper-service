@@ -42,6 +42,32 @@ class TestWhisperCppLanguageDefault:
 
 
 @pytest.mark.unit
+class TestAsrBackend:
+    def test_default_backend_is_faster_whisper(self) -> None:
+        s = Settings()
+        assert s.ASR_BACKEND == "faster-whisper"
+
+    def test_backend_is_normalized(self) -> None:
+        s = Settings(ASR_BACKEND=" Transformers ")
+        assert s.ASR_BACKEND == "transformers"
+
+    def test_unknown_backend_raises(self) -> None:
+        with pytest.raises(ValueError):
+            Settings(ASR_BACKEND="unknown")
+
+
+@pytest.mark.unit
+class TestEmbeddingDevice:
+    def test_default_embedding_device_is_cpu(self) -> None:
+        s = Settings()
+        assert s.EMBEDDING_DEVICE == "cpu"
+
+    def test_embedding_device_can_be_overridden(self) -> None:
+        s = Settings(EMBEDDING_DEVICE="cuda")
+        assert s.EMBEDDING_DEVICE == "cuda"
+
+
+@pytest.mark.unit
 class TestExtraEnvVarsIgnored:
     """.env 中的未知欄位不應導致 pydantic 啟動失敗。"""
 

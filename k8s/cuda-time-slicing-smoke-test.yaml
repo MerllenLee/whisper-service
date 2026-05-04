@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cuda-time-slicing-smoke-test
+  namespace: whisper
+  labels:
+    app: cuda-time-slicing-smoke-test
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+    nvidia.com/gpu.sharing-strategy: time-slicing
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: cuda
+      image: 10.1.1.29:5000/whisper-api:gpu-test
+      imagePullPolicy: IfNotPresent
+      command:
+        - /bin/bash
+        - -lc
+      args:
+        - |
+          set -euo pipefail
+          nvidia-smi
+          sleep 120
+      resources:
+        limits:
+          nvidia.com/gpu: "1"

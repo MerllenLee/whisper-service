@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     DEVICE: str = "auto"
     COMPUTE_TYPE: str = "int8"
     STREAM_MODEL: str = "phate334/Breeze-ASR-25-ct2"
+    ASR_BACKEND: str = "faster-whisper"
+    EMBEDDING_DEVICE: str = "cpu"
 
     # 傳輸限制
     MAX_CHUNK_SIZE: int = 5 * 1024 * 1024  # 5 MB
@@ -55,6 +57,15 @@ class Settings(BaseSettings):
             return info.data.get("DEFAULT_LANGUAGE", "zh")
         return v
 
+    @field_validator("ASR_BACKEND", mode="after")
+    @classmethod
+    def _normalize_asr_backend(cls, v: str) -> str:
+        backend = v.strip().lower()
+        allowed = {"faster-whisper", "transformers"}
+        if backend not in allowed:
+            raise ValueError(f"ASR_BACKEND must be one of: {', '.join(sorted(allowed))}")
+        return backend
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -69,6 +80,8 @@ settings = Settings()
 DEVICE = settings.DEVICE
 COMPUTE_TYPE = settings.COMPUTE_TYPE
 STREAM_MODEL = settings.STREAM_MODEL
+ASR_BACKEND = settings.ASR_BACKEND
+EMBEDDING_DEVICE = settings.EMBEDDING_DEVICE
 MAX_CHUNK_SIZE = settings.MAX_CHUNK_SIZE
 CORS_ORIGINS = settings.CORS_ORIGINS
 DEFAULT_LANGUAGE = settings.DEFAULT_LANGUAGE
