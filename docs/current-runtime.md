@@ -12,7 +12,7 @@
 
 GB10 GPU 目前透過 NVIDIA device plugin 的 time-slicing 共享。
 
-- `nvidia.com/gpu.replicas=2`
+- `nvidia.com/gpu.replicas=4`
 - API 會 request 1 個 GPU slot。
 - LLM 會 request 1 個 GPU slot。
 - 沒有使用 MIG。
@@ -40,12 +40,12 @@ API image 目前是節點本機 image，不預期從 registry pull：
 目前 ASR 語音轉文字設定：
 
 - `ASR_BACKEND=transformers`
-- `STREAM_MODEL=openai/whisper-small`
+- `STREAM_MODEL=MediaTek-Research/Breeze-ASR-25`
 - `DEVICE=auto`
 - `COMPUTE_TYPE=float16`
 - GPU resource：`nvidia.com/gpu: 1`
 
-ASR 目前使用 PyTorch/Transformers 在 CUDA 上以 fp16 執行。
+ASR 目前使用 PyTorch/Transformers 在 CUDA 上以 fp16 執行，模型是 MediaTek Research 的 Breeze-ASR-25 原始 Transformers 版本。
 
 目前 embedding/RAG 檢索設定：
 
@@ -59,24 +59,23 @@ ASR 目前使用 PyTorch/Transformers 在 CUDA 上以 fp16 執行。
 
 部署檔：
 
-- `k8s/llm-deployment.yaml`
+- `k8s/llm-breeze2-wrapper-deployment.yaml`
 - Kubernetes deployment：`whisper/llm`
-- Image：`whisper-llm:v202604291509`
+- Image：`whisper-llm-breeze2-wrapper:test`
 - `imagePullPolicy: Never`
 
 目前文字生成模型：
 
-- `LLM_MODEL=bg-digitalservices/Gemma-4-E2B-NVFP4`
+- `MODEL_ID=MediaTek-Research/Llama-Breeze2-8B-Instruct`
+- `MODEL_PATH=/models/llama-breeze2-8b-instruct`
 
 LLM runtime：
 
-- vLLM OpenAI-compatible API，port `8001`
-- `--quantization modelopt`
-- `--dtype auto`
-- `--kv-cache-dtype fp8`
-- `--gpu-memory-utilization 0.4`
-- `--max-model-len 131072`
-- `--chat-template-content-format string`
+- 自製最小 OpenAI-compatible wrapper，port `8001`
+- 內部依照 MediaTek 官方方式使用 `transformers`、`mtkresearch`、`MRPromptV3`
+- 對外提供 `GET /health`
+- 對外提供 `POST /v1/chat/completions`
+- 目前專案只依賴 `choices[0].message.content`，沒有使用 streaming、tools、embeddings 或 `/v1/models`
 
 LLM 會使用 1 個 GPU slot：
 
@@ -86,16 +85,16 @@ LLM 會使用 1 個 GPU slot：
 
 如果 ASR 語音辨識品質不好，優先調整或替換 API 的 ASR 模型：
 
-- 目前模型：`openai/whisper-small`
+- 目前模型：`MediaTek-Research/Breeze-ASR-25`
+- 先前過渡模型：`openai/whisper-small`
 - 先前正式 ASR 模型：`phate334/Breeze-ASR-25-ct2`，透過 faster-whisper/CTranslate2 在 CPU 上執行
-- 後續候選：原始 PyTorch/Transformers 版本的 Breeze ASR，但需要先驗證 GPU runtime 相容性
 
 如果產出的評鑑意見品質不好，建議依序檢查：
 
 1. `api/app/llm_client.py` 的 prompt 組裝
 2. MiniLM + ChromaDB 的 RAG 檢索結果是否相關
-3. `k8s/llm-deployment.yaml` 裡的 vLLM chat template
-4. LLM 模型本身：`bg-digitalservices/Gemma-4-E2B-NVFP4`
+3. `llm/breeze2_wrapper/app.py` 的 OpenAI-compatible wrapper 是否忠實轉換 messages
+4. LLM 模型本身：`MediaTek-Research/Llama-Breeze2-8B-Instruct`
 
 ## 本機 image 匯入流程
 
@@ -133,4 +132,46 @@ kubectl rollout status -n whisper deployment/api
 ```bash
 kubectl get deploy,pod -n whisper -o wide
 kubectl exec -n whisper deploy/api -- python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health').read().decode())"
+```
+
+## LLM Breeze2 wrapper image 匯入流程
+
+正式 LLM image 也採用節點本機 k3s/containerd image 部署。
+
+建置 image：
+
+```bash
+DOCKER_BUILDKIT=1 docker build \
+  --secret id=hf_token,src=/tmp/hf_token \
+  -f llm/Dockerfile.breeze2-wrapper \
+  -t whisper-llm-breeze2-wrapper:test .
+```
+
+匯出 image tar：
+
+```bash
+docker save -o /tmp/whisper-llm-breeze2-wrapper-test.tar \
+  whisper-llm-breeze2-wrapper:test
+```
+
+在 `wez-dgxspark-01` 匯入 k3s/containerd：
+
+```bash
+sudo k3s ctr images import /tmp/whisper-llm-breeze2-wrapper-test.tar
+```
+
+套用 deployment：
+
+```bash
+kubectl apply -f k8s/llm-breeze2-wrapper-deployment.yaml
+kubectl rollout status -n whisper deployment/llm
+```
+
+驗證：
+
+```bash
+kubectl exec -n whisper deploy/llm -- curl -sS http://127.0.0.1:8001/health
+kubectl exec -n whisper deploy/api -- curl -sS -X POST http://127.0.0.1:8000/api/report \
+  -H 'Content-Type: application/json' \
+  -d '{"transcript":"護理紀錄未即時更新，個案跌倒後未見完整原因分析與改善追蹤。","indicator_code":"A1","facility_type":"機構住宿式"}'
 ```

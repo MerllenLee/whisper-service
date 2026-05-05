@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: api-breeze-asr-app-test
+  namespace: whisper
+  labels:
+    app: api-breeze-asr-app-test
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+    nvidia.com/gpu.sharing-strategy: time-slicing
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: api
+      image: 10.1.1.29:5000/whisper-api:transformers-gpu-app-fp16-input-fix
+      imagePullPolicy: Never
+      ports:
+        - containerPort: 8000
+      env:
+        - name: ASR_BACKEND
+          value: transformers
+        - name: STREAM_MODEL
+          value: MediaTek-Research/Breeze-ASR-25
+        - name: DEVICE
+          value: auto
+        - name: COMPUTE_TYPE
+          value: float16
+        - name: EMBEDDING_DEVICE
+          value: cpu
+        - name: LLM_BASE_URL
+          value: http://llm:8001/v1
+      resources:
+        requests:
+          cpu: "2"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "4"
+          memory: 32Gi
+          nvidia.com/gpu: "1"

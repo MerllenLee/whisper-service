@@ -31,7 +31,7 @@ spec:
             - name: ASR_BACKEND
               value: transformers
             - name: STREAM_MODEL
-              value: openai/whisper-small
+              value: MediaTek-Research/Breeze-ASR-25
             - name: DEVICE
               value: auto
             - name: COMPUTE_TYPE

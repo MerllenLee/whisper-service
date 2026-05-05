@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm
+  namespace: whisper
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: llm
+  template:
+    metadata:
+      labels:
+        app: llm
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: llm
+          image: whisper-llm-breeze2-wrapper:test
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8001
+          env:
+            - name: MODEL_ID
+              value: MediaTek-Research/Llama-Breeze2-8B-Instruct
+            - name: MODEL_PATH
+              value: /models/llama-breeze2-8b-instruct
+            - name: IMG_CONTEXT_TOKEN_ID
+              value: "128212"
+            - name: DEFAULT_MAX_NEW_TOKENS
+              value: "2048"
+            - name: DEFAULT_TEMPERATURE
+              value: "0.3"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 24Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "6"
+              memory: 64Gi
+              nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 3

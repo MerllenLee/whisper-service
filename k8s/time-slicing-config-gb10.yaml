@@ -15,3 +15,14 @@ data:
         resources:
           - name: nvidia.com/gpu
             replicas: 2
+  gb10-shared-4: |
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        failRequestsGreaterThanOne: true
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 4
